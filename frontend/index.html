@@ -20,13 +20,28 @@ input.name-inp { background:#0d1117; border:1px solid #30363d; color:#eee; paddi
 .msg { color:#f0883e; font-size:0.8rem; margin-top:0.5rem; min-height:1rem; }
 
 /* Lobby */
-#lobby-box { width:420px; }
+#lobby-box { width:480px; max-width:96vw; }
 #lobby-players { margin:1rem 0; min-height:60px; }
 .lobby-player { background:#0d1117; border:1px solid #30363d; border-radius:6px; padding:0.5rem 1rem; margin:0.4rem 0; display:flex; align-items:center; gap:0.6rem; }
 .lobby-player-name { flex:1; font-weight:bold; }
+.lobby-player-race { font-size:0.75rem; color:#58a6ff; }
 .lobby-player-you { color:#3fb950; font-size:0.75rem; }
 .lobby-countdown { font-size:2rem; color:#58a6ff; font-weight:bold; margin:0.5rem 0; }
 .lobby-status { color:#8b949e; font-size:0.85rem; }
+
+/* Race selector */
+#race-selector { margin:1rem 0; border:1px solid #30363d; border-radius:8px; overflow:hidden; }
+#race-selector-header { background:#0d1117; padding:0.5rem 1rem; font-size:0.8rem; color:#8b949e; text-align:left; }
+.race-option { display:flex; align-items:flex-start; gap:0.75rem; padding:0.6rem 1rem; cursor:pointer; border-top:1px solid #21262d; transition:background 0.15s; text-align:left; }
+.race-option:hover { background:#1c2128; }
+.race-option.selected { background:#0d2137; border-left:3px solid #58a6ff; }
+.race-icon { font-size:1.4rem; flex-shrink:0; margin-top:0.1rem; }
+.race-info { flex:1; }
+.race-name { font-weight:bold; font-size:0.9rem; color:#eee; }
+.race-desc { font-size:0.75rem; color:#8b949e; margin-top:0.2rem; }
+.race-units-preview { display:flex; gap:0.3rem; flex-wrap:wrap; margin-top:0.4rem; }
+.race-unit-chip { background:#21262d; border:1px solid #30363d; border-radius:4px; padding:0.15rem 0.35rem; font-size:0.7rem; color:#ccc; }
+.race-unit-chip .uc { color:#FFD700; }
 
 /* Game over */
 #gameover-box { width:380px; }
@@ -81,6 +96,13 @@ input.name-inp { background:#0d1117; border:1px solid #30363d; color:#eee; paddi
     <h2>⏳ Waiting for Players</h2>
     <p>Game starts when 2 players join, or countdown reaches zero</p>
     <div id="lobby-players"></div>
+
+    <!-- Race Selector -->
+    <div id="race-selector">
+      <div id="race-selector-header">Choose your race:</div>
+      <!-- populated by JS -->
+    </div>
+
     <div class="lobby-countdown" id="lobby-countdown">60</div>
     <div class="lobby-status" id="lobby-status">Waiting for opponent...</div>
   </div>
@@ -135,14 +157,13 @@ input.name-inp { background:#0d1117; border:1px solid #30363d; color:#eee; paddi
 </div>
 
 <div id="bottombar" style="display:none">
-  <button class="unit-btn" data-type="archer">🏹 Archer<br><span class="cost">10g|D:10|R:3</span></button>
-  <button class="unit-btn" data-type="knight">⚔️ Knight<br><span class="cost">25g|D:20|R:1.5</span></button>
-  <button class="unit-btn" data-type="mage">🔮 Mage<br><span class="cost">40g|D:35|R:4</span></button>
-  <button class="unit-btn" data-type="cannon">💣 Cannon<br><span class="cost">60g|D:60|R:3</span></button>
+  <!-- Unit buttons built dynamically from GAME_CONFIG after race selection -->
   <button id="start-btn">▶ Start Wave</button>
   <button id="lb-btn">🏆</button>
 </div>
 
+<!-- Config must load before the main script -->
+<script src="/config.js"></script>
 <!-- Socket.io client from backend -->
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -157,6 +178,43 @@ document.getElementById('login-name').value = getCookie('player_name') || random
 var socket = io();
 var myName = null, myIndex = null;
 
+// ---- Race selection ----
+var myRace = 'human';
+var opponentRace = 'human';
+
+function buildRaceSelector() {
+  var races = window.GAME_CONFIG.races;
+  var container = document.getElementById('race-selector');
+  // Clear existing options (keep header)
+  var header = container.querySelector('#race-selector-header');
+  container.innerHTML = '';
+  container.appendChild(header);
+  Object.keys(races).forEach(function(raceKey) {
+    var race = races[raceKey];
+    var units = race.units;
+    var unitChips = Object.keys(units).map(function(uk) {
+      var u = units[uk];
+      return '<span class="race-unit-chip">'+u.icon+' '+u.label+' <span class="uc">'+u.cost+'g</span></span>';
+    }).join('');
+    var div = document.createElement('div');
+    div.className = 'race-option' + (raceKey === myRace ? ' selected' : '');
+    div.dataset.race = raceKey;
+    div.innerHTML = '<span class="race-icon">'+race.icon+'</span>'
+      + '<div class="race-info">'
+      +   '<div class="race-name">'+race.name+'</div>'
+      +   '<div class="race-desc">'+race.description+'</div>'
+      +   '<div class="race-units-preview">'+unitChips+'</div>'
+      + '</div>';
+    div.addEventListener('click', function() {
+      myRace = raceKey;
+      container.querySelectorAll('.race-option').forEach(function(o){ o.classList.remove('selected'); });
+      div.classList.add('selected');
+      socket.emit('lobby:race', { race: raceKey });
+    });
+    container.appendChild(div);
+  });
+}
+
 // ---- Login ----
 function login() {
   var name = document.getElementById('login-name').value.trim();
@@ -165,7 +223,9 @@ function login() {
   setCookie('player_name', name, 30);
   document.getElementById('login-overlay').style.display = 'none';
   document.getElementById('lobby-overlay').style.display = 'flex';
+  buildRaceSelector();
   socket.emit('lobby:join', { name: name });
+  socket.emit('lobby:race', { race: myRace });
 }
 document.getElementById('login-btn').addEventListener('click', login);
 document.getElementById('login-name').addEventListener('keydown', function(e){ if(e.key==='Enter') login(); });
@@ -174,7 +234,16 @@ document.getElementById('login-name').addEventListener('keydown', function(e){ i
 socket.on('lobby:update', function(data) {
   myIndex = data.players.findIndex(function(p){ return p.name === myName; });
   var html = data.players.map(function(p) {
-    return '<div class="lobby-player"><span>🟢</span><span class="lobby-player-name">'+p.name+'</span>'+(p.name===myName?'<span class="lobby-player-you">YOU</span>':'')+'</div>';
+    var raceName = '';
+    if (p.race && window.GAME_CONFIG.races[p.race]) {
+      raceName = window.GAME_CONFIG.races[p.race].icon + ' ' + window.GAME_CONFIG.races[p.race].name;
+    }
+    return '<div class="lobby-player">'
+      + '<span>🟢</span>'
+      + '<span class="lobby-player-name">'+p.name+'</span>'
+      + (raceName ? '<span class="lobby-player-race">'+raceName+'</span>' : '')
+      + (p.name===myName ? '<span class="lobby-player-you">YOU</span>' : '')
+      + '</div>';
   }).join('');
   document.getElementById('lobby-players').innerHTML = html || '<div style="color:#8b949e">Waiting for players...</div>';
   document.getElementById('lobby-countdown').textContent = data.countdown > 0 ? data.countdown : '...';
@@ -185,8 +254,12 @@ socket.on('lobby:update', function(data) {
 socket.on('game:start', function(data) {
   document.getElementById('lobby-overlay').style.display = 'none';
   myIndex = data.players.findIndex(function(p){ return p.name === myName; });
+  var myData = data.players.find(function(p){ return p.name === myName; });
   var oppData = data.players.find(function(p){ return p.name !== myName; });
   opponentName = oppData ? oppData.name : 'Opponent';
+  // Load races from game:start payload (server echoes them back)
+  if (myData && myData.race) myRace = myData.race;
+  if (oppData && oppData.race) opponentRace = oppData.race;
   document.getElementById('my-label').textContent = myName + ' (YOU)';
   document.getElementById('opp-label').textContent = opponentName;
   document.getElementById('player-tag').textContent = myName;
@@ -234,34 +307,28 @@ socket.on('wave:go', function(data) {
 
 // Opponent state — interpolation buffer
 var opponentName = 'Opponent';
-var lastOppState = null;       // most recent raw state (for non-position data like HP, wave)
-var oppStateBuffer = [];       // [{ts, state}, ...] — ring buffer of received snapshots
-var INTERP_DELAY = 200;        // render this many ms behind latest received
+var lastOppState = null;
+var oppStateBuffer = [];
+var INTERP_DELAY = 200;
 
 socket.on('opponent:state', function(data) {
   lastOppState = data.state;
   var now = performance.now();
   oppStateBuffer.push({ ts: now, state: data.state });
-  // Keep buffer trimmed — only need ~600ms worth (4 snapshots at 150ms)
   var cutoff = now - 600;
   while (oppStateBuffer.length > 2 && oppStateBuffer[0].ts < cutoff) oppStateBuffer.shift();
 });
 
-// Return interpolated opponent state for rendering.
-// Finds the two snapshots that bracket (now - INTERP_DELAY) and lerps between them.
 function getInterpOppState() {
   if (oppStateBuffer.length === 0) return lastOppState;
   var renderTs = performance.now() - INTERP_DELAY;
-  // Find the two frames that bracket renderTs
   var older = null, newer = null;
   for (var i = 0; i < oppStateBuffer.length; i++) {
     if (oppStateBuffer[i].ts <= renderTs) older = oppStateBuffer[i];
     else { newer = oppStateBuffer[i]; break; }
   }
-  // Not enough history yet — return most recent
   if (!older) return oppStateBuffer[0].state;
   if (!newer) return older.state;
-  // Interpolation factor 0..1
   var t = (renderTs - older.ts) / Math.max(1, newer.ts - older.ts);
   t = Math.max(0, Math.min(1, t));
   return interpStates(older.state, newer.state, t);
@@ -271,19 +338,16 @@ function lerpN(a, b, t) { return a + (b - a) * t; }
 
 function interpStates(a, b, t) {
   if (!a || !b) return b || a;
-  // Interpolate unit positions
   var units = (b.units || []).map(function(ub, i) {
     var ua = a.units && a.units[i];
     if (!ua) return ub;
     return Object.assign({}, ub, { x: lerpN(ua.x, ub.x, t), y: lerpN(ua.y, ub.y, t) });
   });
-  // Interpolate enemy positions
   var enemies = (b.enemies || []).map(function(eb, i) {
     var ea = a.enemies && a.enemies[i];
     if (!ea) return eb;
     return Object.assign({}, eb, { x: lerpN(ea.x, eb.x, t), y: lerpN(ea.y, eb.y, t) });
   });
-  // Interpolate leaked positions
   var leaked = (b.leaked || []).map(function(lb, i) {
     var la = a.leaked && a.leaked[i];
     if (!la) return lb;
@@ -344,12 +408,45 @@ function resize() {
 }
 window.addEventListener('resize', function(){ if(gameActive) resize(); });
 
-var UNIT_DEFS = {
-  archer:{ cost:10, hp:50,  dmg:10, range:3,   atkSpeed:1.0, moveSpeed:1.8, color:'#4CAF50' },
-  knight:{ cost:25, hp:150, dmg:20, range:1.5,  atkSpeed:0.8, moveSpeed:2.2, color:'#2196F3' },
-  mage:  { cost:40, hp:80,  dmg:35, range:4,    atkSpeed:0.5, moveSpeed:1.5, color:'#9C27B0' },
-  cannon:{ cost:60, hp:120, dmg:60, range:3,    atkSpeed:0.3, moveSpeed:1.2, color:'#FF5722' },
-};
+// UNIT_DEFS loaded from GAME_CONFIG at game start, keyed by type string
+var UNIT_DEFS = {};
+
+function loadUnitDefs(raceKey) {
+  var cfg = window.GAME_CONFIG.races[raceKey];
+  if (!cfg) { console.warn('Unknown race:', raceKey); return; }
+  UNIT_DEFS = {};
+  Object.keys(cfg.units).forEach(function(k) {
+    UNIT_DEFS[k] = cfg.units[k];
+  });
+}
+
+function buildUnitBar(raceKey) {
+  var bar = document.getElementById('bottombar');
+  // Remove old unit buttons
+  bar.querySelectorAll('.unit-btn').forEach(function(b){ b.remove(); });
+  var cfg = window.GAME_CONFIG.races[raceKey];
+  if (!cfg) return;
+  var startBtn = document.getElementById('start-btn');
+  Object.keys(cfg.units).forEach(function(k) {
+    var u = cfg.units[k];
+    var btn = document.createElement('button');
+    btn.className = 'unit-btn';
+    btn.dataset.type = k;
+    // Build cost line
+    var details = u.cost+'g';
+    if (u.dmg > 0) details += '|D:'+u.dmg;
+    if (u.range > 0) details += '|R:'+u.range;
+    if (u.special === 'heal') details += '|Heal:'+u.healPerSecond+'/s';
+    if (u.special === 'aura') details += '|Aura';
+    btn.innerHTML = u.icon+' '+u.label+'<br><span class="cost">'+details+'</span>';
+    btn.addEventListener('click', function(){
+      var t = k;
+      selectedType = selectedType === t ? null : t;
+      bar.querySelectorAll('.unit-btn').forEach(function(b){ b.classList.toggle('selected', b.dataset.type === selectedType); });
+    });
+    bar.insertBefore(btn, startBtn);
+  });
+}
 
 var gold, kingHp, maxKingHp, kingAtkCooldown, wave, phase, buildTimer, lastTime;
 var units, enemies, leakedEnemies, particles, kParticles;
@@ -359,9 +456,57 @@ function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
 function clampToField(obj){obj.x=clamp(obj.x,TILE*0.4,myGC.width-TILE*0.4);obj.y=clamp(obj.y,TILE*0.4,myGC.height-TILE*0.4);}
 function isOccupied(c,r){return units.some(function(u){return u.homeCol===c&&u.homeRow===r;});}
 function isPlaceable(c,r){return c>=0&&c<COLS&&r>=1&&r<=18&&!isOccupied(c,r);}
-function makeUnit(c,r,type){var d=UNIT_DEFS[type];return{homeCol:c,homeRow:r,x:(c+0.5)*TILE,y:(r+0.5)*TILE,type,color:d.color,hp:d.hp,maxHp:d.hp,dmg:d.dmg,range:d.range,atkSpeed:d.atkSpeed,moveSpeed:d.moveSpeed*TILE,atkCooldown:0,flashT:0,alive:true};}
+
+function makeUnit(c,r,type) {
+  var d = UNIT_DEFS[type];
+  var u = {
+    homeCol:c, homeRow:r,
+    x:(c+0.5)*TILE, y:(r+0.5)*TILE,
+    type:type, color:d.color,
+    hp:d.hp, maxHp:d.hp,
+    dmg:d.dmg,
+    armor:d.armor||0,
+    range:d.range,
+    atkSpeed:d.atkSpeed,
+    moveSpeed:(d.moveSpeed||2)*TILE,
+    atkCooldown:0, flashT:0, alive:true,
+    special:d.special||null,
+    // aura bonus (recomputed each frame)
+    auraArmor:0, auraDmg:0,
+  };
+  // Special mechanics per type
+  if (d.special === 'charge') {
+    u.chargeCooldown = 0; // starts ready
+    u.chargeCooldownMax = d.chargeCooldownMax || 8;
+    u.chargeMultiplier = d.chargeMultiplier || 2.5;
+    u.knockbackTiles = d.knockbackTiles || 2;
+  }
+  if (d.special === 'heal') {
+    u.healPerSecond = d.healPerSecond || 15;
+    u.healCooldown = 0;
+  }
+  if (d.special === 'splash') {
+    u.splashRadius = d.splashRadius || 1.5;
+    u.splashDmgRatio = d.splashDmgRatio || 0.5;
+  }
+  if (d.special === 'aura') {
+    u.auraRange = d.auraRange || 3.5;
+    u.auraArmorVal = d.auraArmor || 2;
+    u.auraDmgVal = d.auraDmg || 5;
+  }
+  return u;
+}
+
 function dist(ax,ay,bx,by){return Math.hypot(ax-bx,ay-by);}
 function moveTo(obj,tx,ty,spd,dt){var dx=tx-obj.x,dy=ty-obj.y,d=Math.hypot(dx,dy);if(d<1)return;obj.x+=(dx/d)*Math.min(spd*dt,d);obj.y+=(dy/d)*Math.min(spd*dt,d);clampToField(obj);}
+
+// Armor-aware damage application
+function dealDmg(target, dmg) {
+  var totalArmor = (target.armor || 0) + (target.auraArmor || 0);
+  var actual = Math.max(1, dmg - totalArmor);
+  target.hp -= actual;
+  return actual;
+}
 
 function updateUI() {
   document.getElementById('wave-val').textContent = wave;
@@ -376,13 +521,23 @@ function updateUI() {
 }
 
 function spawnWave() {
-  var count=8+(wave-1)*3, hp=Math.round(30*Math.pow(1.2,wave-1)), speed=(1+(wave-1)*0.05)*TILE*0.6;
-  var spacing=(myGC.width-TILE)/Math.max(count-1,1);
-  for(var i=0;i<count;i++) enemies.push({x:clamp(TILE*0.5+i*spacing,TILE*0.4,myGC.width-TILE*0.4),y:TILE*0.5,hp,maxHp:hp,speed,dead:false,leaked:false,flashT:0,atkCooldown:0,alert:null});
+  var cfg = window.GAME_CONFIG.waves;
+  var count = cfg.baseCount + (wave-1) * cfg.countPerWave;
+  var hp = Math.round(cfg.baseHp * Math.pow(cfg.hpGrowthFactor, wave-1));
+  var speed = (cfg.baseSpeed + (wave-1) * cfg.speedPerWave) * TILE;
+  var spacing = (myGC.width-TILE) / Math.max(count-1,1);
+  for(var i=0;i<count;i++) {
+    enemies.push({
+      x:clamp(TILE*0.5+i*spacing,TILE*0.4,myGC.width-TILE*0.4),
+      y:TILE*0.5,
+      hp:hp, maxHp:hp, speed:speed,
+      dead:false, leaked:false, flashT:0, atkCooldown:0, alert:null,
+      armor:0,
+    });
+  }
 }
 
 function startWave() {
-  // Vote to start wave early — server decides when to fire
   if (phase !== 'build') return;
   socket.emit('wave:vote', { wave: wave });
   document.getElementById('start-btn').textContent = '✓ Voted (' + (serverWaveVotes+1) + '/' + serverWaveNeeded + ')';
@@ -391,7 +546,12 @@ function startWave() {
 
 function startBuildPhase() {
   phase='build';
-  units.forEach(function(u){u.x=(u.homeCol+0.5)*TILE;u.y=(u.homeRow+0.5)*TILE;u.hp=u.maxHp;u.alive=true;u.flashT=0;u.atkCooldown=0;});
+  units.forEach(function(u){
+    u.x=(u.homeCol+0.5)*TILE; u.y=(u.homeRow+0.5)*TILE;
+    u.hp=u.maxHp; u.alive=true; u.flashT=0; u.atkCooldown=0;
+    u.auraArmor=0; u.auraDmg=0;
+    if (u.special==='charge') u.chargeCooldown=0;
+  });
   leakedEnemies=[];
   document.getElementById('start-btn').textContent = '▶ Start Wave';
   document.getElementById('start-btn').disabled=false;
@@ -415,21 +575,22 @@ function getMyState() {
 }
 
 function initGame() {
-  gold=50; kingHp=20; maxKingHp=20; kingAtkCooldown=0;
+  var ecoCfg = window.GAME_CONFIG.economy;
+  var kingCfg = window.GAME_CONFIG.king;
+  gold = ecoCfg.startGold;
+  kingHp = kingCfg.hp; maxKingHp = kingCfg.hp; kingAtkCooldown = 0;
   wave=1; phase='build'; buildTimer=30; lastTime=0;
   units=[]; enemies=[]; leakedEnemies=[]; particles=[]; kParticles=[];
   selectedType=null; hoverCell=null; buildInterval=null; scoreSaved=false;
   gameActive=true;
+
+  // Load unit defs for this player's race
+  loadUnitDefs(myRace);
+  // Build the unit bar
+  buildUnitBar(myRace);
+
   resize();
 
-  document.querySelectorAll('.unit-btn').forEach(function(btn){
-    btn.addEventListener('click',function(){
-      var t=btn.dataset.type;
-      selectedType=selectedType===t?null:t;
-      document.querySelectorAll('.unit-btn').forEach(function(b){b.classList.toggle('selected',b.dataset.type===selectedType);});
-    });
-  });
-  document.getElementById('start-btn').addEventListener('click', startWave);
   myGC.addEventListener('mousemove',function(e){var r=myGC.getBoundingClientRect();hoverCell={col:Math.floor((e.clientX-r.left)/TILE),row:Math.floor((e.clientY-r.top)/TILE)};});
   myGC.addEventListener('mouseleave',function(){hoverCell=null;});
   myGC.addEventListener('click',function(e){
@@ -443,12 +604,12 @@ function initGame() {
     updateUI();
   });
 
-  // Broadcast my state every 150ms
+  document.getElementById('start-btn').addEventListener('click', startWave);
+
   stateInterval = setInterval(function(){
     if(gameActive) socket.emit('game:state', getMyState());
   }, 150);
 
-  // Server drives wave timing — just start render loop; wave:state will arrive shortly
   phase = 'build';
   document.getElementById('start-btn').textContent = '▶ Start Wave';
   document.getElementById('start-btn').disabled = false;
@@ -460,10 +621,57 @@ function update(dt) {
   if(phase!=='combat')return;
   dt*=GAME_SPEED;
 
+  // ---- Priest aura: reset then recompute each frame ----
+  for(var u of units){
+    if(!u.alive) continue;
+    u.auraArmor = 0;
+    u.auraDmg = 0;
+  }
+  for(var priest of units){
+    if(!priest.alive || priest.special !== 'aura') continue;
+    for(var ally of units){
+      if(!ally.alive || ally === priest) continue;
+      if(dist(priest.x, priest.y, ally.x, ally.y) <= priest.auraRange * TILE){
+        ally.auraArmor = (ally.auraArmor||0) + priest.auraArmorVal;
+        ally.auraDmg = (ally.auraDmg||0) + priest.auraDmgVal;
+      }
+    }
+  }
+
   for(var u of units){
     if(!u.alive)continue;
     if(u.flashT>0)u.flashT-=dt;
     if(u.atkCooldown>0)u.atkCooldown-=dt;
+
+    // ---- Field Medic special ----
+    if(u.special === 'heal'){
+      if(u.healCooldown>0) u.healCooldown-=dt;
+      // find lowest HP% ally in range (excluding self)
+      var healTarget=null, lowestPct=1.1;
+      for(var ally of units){
+        if(!ally.alive || ally===u) continue;
+        if(ally.hp>=ally.maxHp) continue;
+        var pct=ally.hp/ally.maxHp;
+        var d=dist(u.x,u.y,ally.x,ally.y);
+        if(d<=u.range*TILE && pct<lowestPct){
+          lowestPct=pct; healTarget=ally;
+        }
+      }
+      if(healTarget && u.healCooldown<=0){
+        var healAmt = Math.min(u.healPerSecond * dt, healTarget.maxHp - healTarget.hp);
+        healTarget.hp = Math.min(healTarget.maxHp, healTarget.hp + healAmt);
+        if(healAmt>0.5){
+          particles.push({x:healTarget.x,y:healTarget.y-16,text:'+'+Math.round(healAmt),t:0.7,color:'#a8e6cf'});
+        }
+      }
+      continue; // medics don't attack
+    }
+
+    // ---- Priest: no attack, just aura (handled above) ----
+    if(u.special === 'aura') continue;
+
+    // ---- Regular attack logic ----
+    var effectiveDmg = u.dmg + (u.auraDmg||0);
     var closest=u.alert&&!u.alert.dead&&!u.alert.leaked?u.alert:null;
     var closestD=closest?dist(u.x,u.y,closest.x,closest.y):Infinity;
     var nearestE=null,nearestD=Infinity;
@@ -475,20 +683,69 @@ function update(dt) {
     }
     u.alert=null;
     if(closest&&u.atkCooldown<=0){
-      u.atkCooldown=1/u.atkSpeed;u.flashT=0.1;
-      closest.hp-=u.dmg;closest.flashT=0.12;
-      particles.push({x:closest.x,y:closest.y-16,text:'-'+u.dmg,t:0.9,color:'#FF6B6B'});
-      if(closest.hp<=0){closest.dead=true;gold+=2;updateUI();}
+      u.atkCooldown=1/u.atkSpeed;
+      u.flashT=0.1;
+      closest.flashT=0.12;
+
+      // ---- Knight charge ----
+      if(u.special === 'charge'){
+        if(u.chargeCooldown<=0){
+          // Charge attack!
+          var chargeDmg = Math.round(effectiveDmg * u.chargeMultiplier);
+          var actual = dealDmg(closest, chargeDmg);
+          particles.push({x:closest.x,y:closest.y-20,text:'⚡'+actual,t:1.1,color:'#FFD700',big:true});
+          // Knockback toward spawn (negative Y)
+          var knockbackY = u.knockbackTiles * TILE;
+          closest.y = clamp(closest.y - knockbackY, TILE*0.4, myGC.height-TILE*0.4);
+          closest.x = clamp(closest.x, TILE*0.4, myGC.width-TILE*0.4);
+          u.chargeCooldown = u.chargeCooldownMax;
+        } else {
+          // Normal attack
+          var actual = dealDmg(closest, effectiveDmg);
+          particles.push({x:closest.x,y:closest.y-16,text:'-'+actual,t:0.9,color:'#FF6B6B'});
+          u.chargeCooldown -= dt; // also tick here (main tick below)
+        }
+      }
+      // ---- Catapult splash ----
+      else if(u.special === 'splash'){
+        var actual = dealDmg(closest, effectiveDmg);
+        particles.push({x:closest.x,y:closest.y-16,text:'-'+actual,t:0.9,color:'#FF6B6B'});
+        var ix=closest.x, iy=closest.y;
+        var splashDmg = Math.round(effectiveDmg * u.splashDmgRatio);
+        for(var se of enemies){
+          if(se.dead||se.leaked||se===closest) continue;
+          if(dist(ix,iy,se.x,se.y)<=u.splashRadius*TILE){
+            var sa = dealDmg(se, splashDmg);
+            se.flashT=0.12;
+            particles.push({x:se.x,y:se.y-12,text:'-'+sa,t:0.7,color:'#FF9800'});
+            if(se.hp<=0){se.dead=true;gold+=window.GAME_CONFIG.economy.killGold;updateUI();}
+          }
+        }
+      }
+      // ---- Normal attack ----
+      else {
+        var actual = dealDmg(closest, effectiveDmg);
+        particles.push({x:closest.x,y:closest.y-16,text:'-'+actual,t:0.9,color:'#FF6B6B'});
+      }
+
+      if(closest.hp<=0){closest.dead=true;gold+=window.GAME_CONFIG.economy.killGold;updateUI();}
       for(var ally of units){if(!ally.alive||ally===u)continue;if(!ally.alert&&dist(u.x,u.y,ally.x,ally.y)<=TILE*3)ally.alert=closest;}
     } else if(nearestE&&nearestD>u.range*TILE*0.85&&nearestD<=u.range*TILE*2.5){
       moveTo(u,nearestE.x,nearestE.y,u.moveSpeed,dt);
     } else if(!nearestE||nearestD>u.range*TILE*2.5){
       moveTo(u,(u.homeCol+0.5)*TILE,(u.homeRow+0.5)*TILE,u.moveSpeed*0.5,dt);
     }
+
+    // Charge cooldown ticks every frame (not just on attack)
+    if(u.special === 'charge' && u.chargeCooldown > 0){
+      u.chargeCooldown = Math.max(0, u.chargeCooldown - dt);
+    }
+
     u.x=clamp(u.x,TILE*0.35,myGC.width-TILE*0.35);
     u.y=clamp(u.y,TILE*0.35,myGC.height-TILE*0.35);
   }
 
+  // Unit-unit separation
   for(var i=0;i<units.length;i++){if(!units[i].alive)continue;for(var j=i+1;j<units.length;j++){if(!units[j].alive)continue;var dx=units[j].x-units[i].x,dy=units[j].y-units[i].y,d=Math.hypot(dx,dy),md=TILE*0.7;if(d<md&&d>0.1){var push=(md-d)/2;units[i].x-=(dx/d)*push;units[i].y-=(dy/d)*push;units[j].x+=(dx/d)*push;units[j].y+=(dy/d)*push;clampToField(units[i]);clampToField(units[j]);}}}
 
   var exitY=(EXIT_ROW+0.5)*TILE,lx=(LANE_X_TILE+0.5)*TILE;
@@ -500,24 +757,52 @@ function update(dt) {
     var nearestUD=nearestU?dist(e.x,e.y,nearestU.x,nearestU.y):Infinity;
     e.alert=null;
     for(var u of units){if(!u.alive)continue;var d=dist(e.x,e.y,u.x,u.y);if(d<nearestUD){nearestU=u;nearestUD=d;}}
-    if(nearestU&&nearestUD<=TILE*1.1){if(e.atkCooldown<=0){e.atkCooldown=1.0;nearestU.hp-=15;nearestU.flashT=0.15;particles.push({x:nearestU.x,y:nearestU.y-14,text:'-15',t:0.8,color:'#e74c3c'});if(nearestU.hp<=0){nearestU.alive=false;nearestU.hp=0;}for(var ally of enemies){if(ally.dead||ally.leaked||ally===e)continue;if(!ally.alert&&dist(e.x,e.y,ally.x,ally.y)<=TILE*3)ally.alert=nearestU;}}}
+    if(nearestU&&nearestUD<=TILE*1.1){
+      if(e.atkCooldown<=0){
+        e.atkCooldown=1.0;
+        var eDmg=15;
+        var actual=dealDmg(nearestU, eDmg);
+        nearestU.flashT=0.15;
+        particles.push({x:nearestU.x,y:nearestU.y-14,text:'-'+actual,t:0.8,color:'#e74c3c'});
+        if(nearestU.hp<=0){nearestU.alive=false;nearestU.hp=0;}
+        for(var ally of enemies){if(ally.dead||ally.leaked||ally===e)continue;if(!ally.alert&&dist(e.x,e.y,ally.x,ally.y)<=TILE*3)ally.alert=nearestU;}
+      }
+    }
     else if(nearestU&&nearestUD<TILE*5){moveTo(e,nearestU.x,nearestU.y,e.speed,dt);}
     else{moveTo(e,lx,exitY,e.speed,dt);}
-    if(e.y>=EXIT_ROW*TILE+TILE*0.3){e.leaked=true;leakedEnemies.push({x:(KC/2+(Math.random()-0.5)*1.5)*KT,y:KT*1.2,hp:Math.ceil(e.hp),maxHp:e.maxHp,speed:e.speed*1.3,dead:false,flashT:0.6,atkCooldown:0});kParticles.push({x:KC/2*KT,y:KT*1.5,text:'⚡ LEAKED!',t:1.8,color:'#e74c3c',big:true});}
+    if(e.y>=EXIT_ROW*TILE+TILE*0.3){e.leaked=true;leakedEnemies.push({x:(KC/2+(Math.random()-0.5)*1.5)*KT,y:KT*1.2,hp:Math.ceil(e.hp),maxHp:e.maxHp,speed:e.speed*1.3,dead:false,flashT:0.6,atkCooldown:0,armor:0});;kParticles.push({x:KC/2*KT,y:KT*1.5,text:'⚡ LEAKED!',t:1.8,color:'#e74c3c',big:true});}
     else{e.x=clamp(e.x,TILE*0.3,myGC.width-TILE*0.3);e.y=clamp(e.y,TILE*0.3,myGC.height-TILE*0.3);}
   }
 
   var kw=myKC.width,kh=myKC.height,kingX=kw/2,kingY=kh*0.7;
+  var kingCfg2 = window.GAME_CONFIG.king;
   if(kingAtkCooldown>0)kingAtkCooldown-=dt;
   for(var e of leakedEnemies){
     if(e.dead)continue;
     if(e.flashT>0)e.flashT-=dt;
     if(e.atkCooldown>0)e.atkCooldown-=dt;
     var d=dist(e.x,e.y,kingX,kingY);
-    if(d<=KT*1.1){if(e.atkCooldown<=0){e.atkCooldown=0.8;kingHp=Math.max(0,kingHp-10);kParticles.push({x:kingX+(Math.random()-0.5)*KT,y:kingY-KT*0.4,text:'-10',t:1.0,color:'#e74c3c'});updateUI();if(kingHp<=0){if(!scoreSaved){scoreSaved=true;socket.emit('game:over',{wave:wave});}stopGame();return;}}}
+    if(d<=KT*kingCfg2.atkRange){
+      if(e.atkCooldown<=0){
+        e.atkCooldown=0.8;
+        kingHp=Math.max(0,kingHp-10);
+        kParticles.push({x:kingX+(Math.random()-0.5)*KT,y:kingY-KT*0.4,text:'-10',t:1.0,color:'#e74c3c'});
+        updateUI();
+        if(kingHp<=0){if(!scoreSaved){scoreSaved=true;socket.emit('game:over',{wave:wave});}stopGame();return;}
+      }
+    }
     else{var dx=kingX-e.x,dy=kingY-e.y,d2=Math.hypot(dx,dy),s=Math.min(e.speed*1.5*dt,d2);e.x+=(dx/d2)*s;e.y+=(dy/d2)*s;e.x=clamp(e.x,KT*0.3,kw-KT*0.3);e.y=clamp(e.y,KT*0.3,kh-KT*0.3);}
   }
-  if(kingAtkCooldown<=0&&leakedEnemies.filter(function(e){return!e.dead;}).length>0){var target=null,tDist=Infinity;for(var e of leakedEnemies){if(e.dead)continue;var d=dist(e.x,e.y,kingX,kingY);if(d<tDist){target=e;tDist=d;}}if(target){kingAtkCooldown=2.0;target.hp-=12;target.flashT=0.15;kParticles.push({x:target.x,y:target.y-12,text:'-18',t:0.8,color:'#FFD700'});if(target.hp<=0)target.dead=true;}}
+  if(kingAtkCooldown<=0&&leakedEnemies.filter(function(e){return!e.dead;}).length>0){
+    var target=null,tDist=Infinity;
+    for(var e of leakedEnemies){if(e.dead)continue;var d=dist(e.x,e.y,kingX,kingY);if(d<tDist){target=e;tDist=d;}}
+    if(target){
+      kingAtkCooldown=kingCfg2.atkCooldown;
+      target.hp-=kingCfg2.atkDmg; target.flashT=0.15;
+      kParticles.push({x:target.x,y:target.y-12,text:'-'+kingCfg2.atkDmg,t:0.8,color:'#FFD700'});
+      if(target.hp<=0)target.dead=true;
+    }
+  }
 
   for(var i=0;i<enemies.length;i++){if(enemies[i].dead||enemies[i].leaked)continue;for(var j=i+1;j<enemies.length;j++){if(enemies[j].dead||enemies[j].leaked)continue;var dx=enemies[j].x-enemies[i].x,dy=enemies[j].y-enemies[i].y,d=Math.hypot(dx,dy),md=TILE*0.65;if(d<md&&d>0.1){var push=(md-d)/2;enemies[i].x-=(dx/d)*push;enemies[i].y-=(dy/d)*push;enemies[j].x+=(dx/d)*push;enemies[j].y+=(dy/d)*push;clampToField(enemies[i]);clampToField(enemies[j]);}}}
   for(var i=0;i<leakedEnemies.length;i++){if(leakedEnemies[i].dead)continue;for(var j=i+1;j<leakedEnemies.length;j++){if(leakedEnemies[j].dead)continue;var dx=leakedEnemies[j].x-leakedEnemies[i].x,dy=leakedEnemies[j].y-leakedEnemies[i].y,d=Math.hypot(dx,dy),md=KT*0.65;if(d<md&&d>0.1){var push=(md-d)/2;leakedEnemies[i].x-=(dx/d)*push;leakedEnemies[i].y-=(dy/d)*push;leakedEnemies[j].x+=(dx/d)*push;leakedEnemies[j].y+=(dy/d)*push;leakedEnemies[i].x=clamp(leakedEnemies[i].x,KT*0.3,myKC.width-KT*0.3);leakedEnemies[i].y=clamp(leakedEnemies[i].y,KT*0.3,myKC.height-KT*0.3);leakedEnemies[j].x=clamp(leakedEnemies[j].x,KT*0.3,myKC.width-KT*0.3);leakedEnemies[j].y=clamp(leakedEnemies[j].y,KT*0.3,myKC.height-KT*0.3);}}}
@@ -529,16 +814,15 @@ function update(dt) {
   var kAlive=leakedEnemies.filter(function(e){return!e.dead;});
   if(mainAlive.length===0&&kAlive.length===0&&enemies.length>0){
     var leaks=enemies.filter(function(e){return e.leaked;}).length;
-    var income=10+wave+(leaks===0?5:0);
+    var ecoCfg2=window.GAME_CONFIG.economy;
+    var income=ecoCfg2.waveCompleteBase+wave+(leaks===0?ecoCfg2.waveCompleteCleanBonus:0);
     gold+=income;
     var finishedWave=wave;
     wave++;enemies=[];leakedEnemies=[];scoreSaved=false;
-    particles.push({x:myGC.width/2,y:myGC.height/2,text:leaks===0?'✓ CLEAN! +'+income+'g':'WAVE DONE +'+(10+finishedWave)+'g',t:2.0,color:leaks===0?'#2ecc71':'#f1c40f',big:true});
+    particles.push({x:myGC.width/2,y:myGC.height/2,text:leaks===0?'✓ CLEAN! +'+income+'g':'WAVE DONE +'+(ecoCfg2.waveCompleteBase+finishedWave)+'g',t:2.0,color:leaks===0?'#2ecc71':'#f1c40f',big:true});
     phase='income';
     updateUI();
-    // Notify server — it will start the next build cycle for both players
     socket.emit('wave:complete', { wave: finishedWave });
-    // Fallback: start build phase locally once server sends wave:state for next wave
     setTimeout(startBuildPhase, 1800);
   }
 }
@@ -557,9 +841,38 @@ function drawMyGrid() {
   ctx.strokeStyle='rgba(255,255,255,0.055)';ctx.lineWidth=0.5;
   for(var i=0;i<=COLS;i++){ctx.beginPath();ctx.moveTo(i*TILE,0);ctx.lineTo(i*TILE,c.height);ctx.stroke();}
   for(var i=0;i<=ROWS;i++){ctx.beginPath();ctx.moveTo(0,i*TILE);ctx.lineTo(c.width,i*TILE);ctx.stroke();}
-  if(hoverCell&&phase==='build'&&selectedType){var col=hoverCell.col,row=hoverCell.row;ctx.fillStyle=isPlaceable(col,row)?'rgba(255,255,255,0.09)':'rgba(255,0,0,0.14)';ctx.fillRect(col*TILE,row*TILE,TILE,TILE);if(isPlaceable(col,row)){ctx.strokeStyle='rgba(255,255,255,0.17)';ctx.lineWidth=1;ctx.beginPath();ctx.arc((col+0.5)*TILE,(row+0.5)*TILE,UNIT_DEFS[selectedType].range*TILE,0,Math.PI*2);ctx.stroke();}}
-  for(var u of units){if(!u.alive&&phase==='combat')continue;var r=TILE*0.36;ctx.fillStyle=u.flashT>0?'#fff':u.color;ctx.beginPath();ctx.arc(u.x,u.y,r,0,Math.PI*2);ctx.fill();var hpR=u.hp/u.maxHp;ctx.fillStyle='#111';ctx.fillRect(u.x-r,u.y-r-5,r*2,3);ctx.fillStyle=hpR>0.5?'#2ecc71':hpR>0.25?'#f39c12':'#e74c3c';ctx.fillRect(u.x-r,u.y-r-5,r*2*hpR,3);}
-  for(var e of enemies){if(e.dead||e.leaked)continue;var w=TILE*0.68,h=TILE*0.48;ctx.fillStyle=e.flashT>0?'#fff':'#e74c3c';ctx.beginPath();ctx.roundRect(e.x-w/2,e.y-h/2,w,h,3);ctx.fill();var hpR=e.hp/e.maxHp;ctx.fillStyle='#333';ctx.fillRect(e.x-w/2,e.y-h/2-6,w,4);ctx.fillStyle=hpR>0.5?'#2ecc71':hpR>0.25?'#f39c12':'#e74c3c';ctx.fillRect(e.x-w/2,e.y-h/2-6,w*hpR,4);}
+  if(hoverCell&&phase==='build'&&selectedType&&UNIT_DEFS[selectedType]){
+    var col=hoverCell.col,row=hoverCell.row;
+    ctx.fillStyle=isPlaceable(col,row)?'rgba(255,255,255,0.09)':'rgba(255,0,0,0.14)';ctx.fillRect(col*TILE,row*TILE,TILE,TILE);
+    if(isPlaceable(col,row)){ctx.strokeStyle='rgba(255,255,255,0.17)';ctx.lineWidth=1;ctx.beginPath();ctx.arc((col+0.5)*TILE,(row+0.5)*TILE,UNIT_DEFS[selectedType].range*TILE,0,Math.PI*2);ctx.stroke();}
+  }
+  for(var u of units){
+    if(!u.alive&&phase==='combat')continue;
+    var r=TILE*0.36;
+    ctx.fillStyle=u.flashT>0?'#fff':u.color;
+    ctx.beginPath();ctx.arc(u.x,u.y,r,0,Math.PI*2);ctx.fill();
+    // Aura ring for priests
+    if(u.special==='aura'){
+      ctx.strokeStyle='rgba(255,215,0,0.25)';ctx.lineWidth=1;
+      ctx.beginPath();ctx.arc(u.x,u.y,u.auraRange*TILE,0,Math.PI*2);ctx.stroke();
+    }
+    // Charge ready indicator
+    if(u.special==='charge'&&u.chargeCooldown<=0){
+      ctx.strokeStyle='#FFD700';ctx.lineWidth=1.5;
+      ctx.beginPath();ctx.arc(u.x,u.y,r+3,0,Math.PI*2);ctx.stroke();
+    }
+    var hpR=u.hp/u.maxHp;
+    ctx.fillStyle='#111';ctx.fillRect(u.x-r,u.y-r-5,r*2,3);
+    ctx.fillStyle=hpR>0.5?'#2ecc71':hpR>0.25?'#f39c12':'#e74c3c';ctx.fillRect(u.x-r,u.y-r-5,r*2*hpR,3);
+  }
+  for(var e of enemies){
+    if(e.dead||e.leaked)continue;
+    var w=TILE*0.68,h=TILE*0.48;
+    ctx.fillStyle=e.flashT>0?'#fff':'#e74c3c';
+    ctx.beginPath();ctx.roundRect(e.x-w/2,e.y-h/2,w,h,3);ctx.fill();
+    var hpR=e.hp/e.maxHp;ctx.fillStyle='#333';ctx.fillRect(e.x-w/2,e.y-h/2-6,w,4);
+    ctx.fillStyle=hpR>0.5?'#2ecc71':hpR>0.25?'#f39c12':'#e74c3c';ctx.fillRect(e.x-w/2,e.y-h/2-6,w*hpR,4);
+  }
   for(var p of particles){ctx.globalAlpha=Math.min(1,p.t);ctx.font=p.big?'bold 16px Segoe UI':'bold 11px Segoe UI';ctx.fillStyle=p.color;ctx.textAlign='center';ctx.shadowColor='#000';ctx.shadowBlur=p.big?6:3;ctx.fillText(p.text,p.x,p.y);ctx.shadowBlur=0;ctx.globalAlpha=1;}
   ctx.textAlign='left';
 }
@@ -589,18 +902,14 @@ function drawMyKing() {
 function drawOppGrid() {
   var ctx=oppCtx, c=oppGC, s=getInterpOppState();
   ctx.fillStyle='#1a1a2e';ctx.fillRect(0,0,c.width,c.height);
-  // Draw static zones
   ctx.fillStyle='rgba(231,76,60,0.08)';ctx.fillRect(0,0,c.width,TILE);
   ctx.fillStyle='rgba(155,89,182,0.08)';ctx.fillRect(0,EXIT_ROW*TILE,c.width,TILE);
   ctx.strokeStyle='rgba(255,255,255,0.04)';ctx.lineWidth=0.5;
   for(var i=0;i<=COLS;i++){ctx.beginPath();ctx.moveTo(i*TILE,0);ctx.lineTo(i*TILE,c.height);ctx.stroke();}
   for(var i=0;i<=ROWS;i++){ctx.beginPath();ctx.moveTo(0,i*TILE);ctx.lineTo(c.width,i*TILE);ctx.stroke();}
   if(!s){ctx.fillStyle='rgba(255,255,255,0.2)';ctx.font='14px Segoe UI';ctx.textAlign='center';ctx.fillText('Waiting for opponent...',c.width/2,c.height/2);ctx.textAlign='left';return;}
-  // Units
   for(var u of (s.units||[])){if(!u.alive)continue;var r=TILE*0.36;ctx.fillStyle=u.flashT>0?'#fff':u.color;ctx.beginPath();ctx.arc(u.x,u.y,r,0,Math.PI*2);ctx.fill();var hpR=u.hp/u.maxHp;ctx.fillStyle='#111';ctx.fillRect(u.x-r,u.y-r-5,r*2,3);ctx.fillStyle=hpR>0.5?'#2ecc71':hpR>0.25?'#f39c12':'#e74c3c';ctx.fillRect(u.x-r,u.y-r-5,r*2*hpR,3);}
-  // Enemies
   for(var e of (s.enemies||[])){var w=TILE*0.68,h=TILE*0.48;ctx.fillStyle=e.flashT>0?'#fff':'#e74c3c';ctx.beginPath();ctx.roundRect(e.x-w/2,e.y-h/2,w,h,3);ctx.fill();var hpR=e.hp/e.maxHp;ctx.fillStyle='#333';ctx.fillRect(e.x-w/2,e.y-h/2-6,w,4);ctx.fillStyle=hpR>0.5?'#2ecc71':hpR>0.25?'#f39c12':'#e74c3c';ctx.fillRect(e.x-w/2,e.y-h/2-6,w*hpR,4);}
-  // Wave label
   ctx.fillStyle='rgba(52,152,219,0.7)';ctx.font='bold '+Math.floor(TILE*0.4)+'px Segoe UI';ctx.textAlign='center';ctx.fillText('Wave '+(s.wave||1),c.width/2,TILE*1.8);ctx.textAlign='left';
 }
 

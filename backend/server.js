@@ -92,7 +92,7 @@ function broadcastLobby() {
   if (!currentLobby) return;
   io.to('lobby:' + currentLobby.id).emit('lobby:update', {
     id: currentLobby.id,
-    players: currentLobby.players.map(function(p) { return { name: p.name, ready: p.ready }; }),
+    players: currentLobby.players.map(function(p) { return { name: p.name, ready: p.ready, race: p.race || 'human' }; }),
     gameStarted: currentLobby.gameStarted,
     countdown: currentLobby.countdown || 60,
   });
@@ -107,7 +107,7 @@ function startGame(lobbyId) {
   currentLobby._waveCompleted = 0;
   console.log('Game starting for lobby', lobbyId, 'players:', currentLobby.players.map(p=>p.name));
   io.to('lobby:' + lobbyId).emit('game:start', {
-    players: currentLobby.players.map(function(p) { return { name: p.name, index: p.index }; })
+    players: currentLobby.players.map(function(p) { return { name: p.name, index: p.index, race: p.race || 'human' }; })
   });
   // Start wave cycle from wave 1
   startWaveCycle(lobbyId, 1);
@@ -129,7 +129,7 @@ io.on('connection', function(socket) {
     }
 
     var playerIndex = currentLobby.players.length;
-    var player = { socketId: socket.id, name: name, index: playerIndex, ready: true };
+    var player = { socketId: socket.id, name: name, index: playerIndex, ready: true, race: 'human' };
     currentLobby.players.push(player);
     socket.join('lobby:' + currentLobby.id);
     socket.lobbyId = currentLobby.id;
@@ -163,6 +163,16 @@ io.on('connection', function(socket) {
       }, 1000);
       lobbyTimer = tick;
     }
+  });
+
+  // Race selection
+  socket.on('lobby:race', function(data) {
+    if (!socket.lobbyId || !currentLobby) return;
+    var player = currentLobby.players.find(function(p) { return p.socketId === socket.id; });
+    if (!player) return;
+    var race = (data && data.race) ? data.race : 'human';
+    player.race = race;
+    broadcastLobby();
   });
 
   // Wave vote
