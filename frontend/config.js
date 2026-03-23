@@ -66,7 +66,7 @@ window.GAME_CONFIG = {
           moveSpeed: 1.8,
           color: '#a8e6cf',
           special: 'heal',
-          healPerSecond: 15, // HP healed per second
+          healPerSecond: 25, // HP healed per second
         },
         catapult: {
           label: 'Catapult',
@@ -97,9 +97,9 @@ window.GAME_CONFIG = {
           moveSpeed: 1.5,
           color: '#ffd700',
           special: 'aura',
-          auraRange: 3.5,   // tiles
-          auraArmor: 2,     // flat armor added to allies
-          auraDmg: 5,       // flat damage added to allies
+          auraRange: 4.0,   // tiles
+          auraArmor: 3,     // flat armor added to allies
+          auraDmg: 8,       // flat damage added to allies
         },
       }
     }
@@ -126,7 +126,7 @@ window.GAME_CONFIG = {
 
   // King
   king: {
-    hp: 20,
+    hp: 100,
     atkDmg: 18,
     atkCooldown: 2.0,
     atkRange: 1.1,  // in KT units

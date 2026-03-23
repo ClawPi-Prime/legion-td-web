@@ -175,6 +175,14 @@ io.on('connection', function(socket) {
     broadcastLobby();
   });
 
+  // Quick start — force start with just one player (for testing)
+  socket.on('lobby:quickstart', function() {
+    if (!socket.lobbyId || !currentLobby || currentLobby.gameStarted) return;
+    var lid = currentLobby.id;
+    clearTimeout(lobbyTimer);
+    setTimeout(function() { startGame(lid); }, 200);
+  });
+
   // Wave vote
   socket.on('wave:vote', function(data) {
     if (!socket.lobbyId || !currentLobby || !waveState) return;

@@ -105,6 +105,7 @@ input.name-inp { background:#0d1117; border:1px solid #30363d; color:#eee; paddi
 
     <div class="lobby-countdown" id="lobby-countdown">60</div>
     <div class="lobby-status" id="lobby-status">Waiting for opponent...</div>
+    <button class="btn-primary" id="quick-start-btn" style="margin-top:1rem;background:#c0392b;display:none">⚡ Quick Start (solo)</button>
   </div>
 </div>
 
@@ -128,6 +129,7 @@ input.name-inp { background:#0d1117; border:1px solid #30363d; color:#eee; paddi
 
 <!-- Game UI (hidden until game starts) -->
 <div id="topbar" style="display:none">
+  <div class="stat" style="color:#444;font-size:10px">v0.16</div>
   <div class="stat"><span>YOU</span><span id="player-tag">—</span></div>
   <div class="stat"><span>WAVE</span><span id="wave-val">1</span></div>
   <div class="stat"><span>GOLD</span><span id="gold-val">50g</span></div>
@@ -230,6 +232,10 @@ function login() {
 document.getElementById('login-btn').addEventListener('click', login);
 document.getElementById('login-name').addEventListener('keydown', function(e){ if(e.key==='Enter') login(); });
 
+// Quick Start — show after joining lobby, starts solo game immediately
+document.getElementById('quick-start-btn').addEventListener('click', function() {
+  socket.emit('lobby:quickstart');
+});
 // ---- Lobby ----
 socket.on('lobby:update', function(data) {
   myIndex = data.players.findIndex(function(p){ return p.name === myName; });
@@ -248,6 +254,10 @@ socket.on('lobby:update', function(data) {
   document.getElementById('lobby-players').innerHTML = html || '<div style="color:#8b949e">Waiting for players...</div>';
   document.getElementById('lobby-countdown').textContent = data.countdown > 0 ? data.countdown : '...';
   document.getElementById('lobby-status').textContent = data.players.length >= 2 ? 'Starting now!' : 'Waiting for opponent... ('+(data.players.length)+'/2)';
+  // Quick start button visibility
+  var inLobby = data.players.some(function(p){ return p.name === myName; });
+  var qs = document.getElementById('quick-start-btn');
+  if (qs) qs.style.display = inLobby && !data.gameStarted ? 'block' : 'none';
 });
 
 // ---- Game start ----
@@ -291,7 +301,20 @@ socket.on('wave:state', function(data) {
   serverWaveTimer = data.buildTimer;
   serverWaveVotes = data.votes;
   serverWaveNeeded = data.needed;
-  if (gameActive) updateUI();
+  if (gameActive) {
+    // Keep vote button text in sync with actual server vote count
+    var btn = document.getElementById('start-btn');
+    if (btn && phase === 'build') {
+      if (data.votes > 0) {
+        btn.textContent = '✓ Voted (' + data.votes + '/' + data.needed + ')';
+        btn.disabled = true;
+      } else {
+        btn.textContent = '▶ Start Wave';
+        btn.disabled = false;
+      }
+    }
+    updateUI();
+  }
 });
 
 socket.on('wave:go', function(data) {
@@ -450,6 +473,10 @@ function buildUnitBar(raceKey) {
 
 var gold, kingHp, maxKingHp, kingAtkCooldown, wave, phase, buildTimer, lastTime;
 var units, enemies, leakedEnemies, particles, kParticles;
+// Squad alert: shared global target. Any unit that spots an enemy updates this.
+// All units use it as their pursuit target when they have nothing in their own range.
+var squadAlertEnemy = null;  // current shared enemy target for all units
+var squadAlertUnit = null;   // current shared unit target for all enemies
 var selectedType, hoverCell, buildInterval, scoreSaved;
 
 function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
@@ -531,7 +558,7 @@ function spawnWave() {
       x:clamp(TILE*0.5+i*spacing,TILE*0.4,myGC.width-TILE*0.4),
       y:TILE*0.5,
       hp:hp, maxHp:hp, speed:speed,
-      dead:false, leaked:false, flashT:0, atkCooldown:0, alert:null,
+      dead:false, leaked:false, flashT:0, atkCooldown:0,
       armor:0,
     });
   }
@@ -548,7 +575,7 @@ function startBuildPhase() {
   phase='build';
   units.forEach(function(u){
     u.x=(u.homeCol+0.5)*TILE; u.y=(u.homeRow+0.5)*TILE;
-    u.hp=u.maxHp; u.alive=true; u.flashT=0; u.atkCooldown=0;
+    u.hp=u.maxHp; u.alive=true; u.flashT=0; u.atkCooldown=0; u.healTarget=null; u.healCooldown=0;
     u.auraArmor=0; u.auraDmg=0;
     if (u.special==='charge') u.chargeCooldown=0;
   });
@@ -582,6 +609,7 @@ function initGame() {
   wave=1; phase='build'; buildTimer=30; lastTime=0;
   units=[]; enemies=[]; leakedEnemies=[]; particles=[]; kParticles=[];
   selectedType=null; hoverCell=null; buildInterval=null; scoreSaved=false;
+  squadAlertEnemy=null; squadAlertUnit=null;
   gameActive=true;
 
   // Load unit defs for this player's race
@@ -622,66 +650,140 @@ function update(dt) {
   dt*=GAME_SPEED;
 
   // ---- Priest aura: reset then recompute each frame ----
-  for(var u of units){
-    if(!u.alive) continue;
-    u.auraArmor = 0;
-    u.auraDmg = 0;
-  }
-  for(var priest of units){
-    if(!priest.alive || priest.special !== 'aura') continue;
-    for(var ally of units){
-      if(!ally.alive || ally === priest) continue;
-      if(dist(priest.x, priest.y, ally.x, ally.y) <= priest.auraRange * TILE){
-        ally.auraArmor = (ally.auraArmor||0) + priest.auraArmorVal;
-        ally.auraDmg = (ally.auraDmg||0) + priest.auraDmgVal;
+  // Use distinct variable names (pr/al) to avoid shadowing the main loop variable (u)
+  for(var pi=0; pi<units.length; pi++){ if(units[pi].alive){ units[pi].auraArmor=0; units[pi].auraDmg=0; } }
+  for(var pi=0; pi<units.length; pi++){
+    var pr=units[pi];
+    if(!pr.alive || pr.special!=='aura') continue;
+    for(var ai=0; ai<units.length; ai++){
+      var al=units[ai];
+      if(!al.alive || al===pr) continue;
+      if(dist(pr.x,pr.y,al.x,al.y) <= pr.auraRange*TILE){
+        al.auraArmor += pr.auraArmorVal;
+        al.auraDmg   += pr.auraDmgVal;
       }
     }
   }
+
+  // Count how many units are already responding to squad alert (capped pursuit)
+  var SQUAD_ALERT_CAP = 5;
 
   for(var u of units){
     if(!u.alive)continue;
-    if(u.flashT>0)u.flashT-=dt;
-    if(u.atkCooldown>0)u.atkCooldown-=dt;
+    if(u.flashT>0) u.flashT-=dt;
+    if(u.atkCooldown>0) u.atkCooldown-=dt;
 
-    // ---- Field Medic special ----
-    if(u.special === 'heal'){
-      if(u.healCooldown>0) u.healCooldown-=dt;
-      // find lowest HP% ally in range (excluding self)
-      var healTarget=null, lowestPct=1.1;
-      for(var ally of units){
-        if(!ally.alive || ally===u) continue;
-        if(ally.hp>=ally.maxHp) continue;
-        var pct=ally.hp/ally.maxHp;
-        var d=dist(u.x,u.y,ally.x,ally.y);
-        if(d<=u.range*TILE && pct<lowestPct){
-          lowestPct=pct; healTarget=ally;
+    // =============================================
+    // PRIEST — follows the strongest non-priest
+    // ally and stays 2 tiles behind it (toward spawn)
+    // =============================================
+    if(u.special==='aura'){
+
+      // Step 1: Find the ally with the highest maxHp that is not a priest
+      var priestTarget = null;
+      var priestBestHp = -1;
+      for(var i=0; i<units.length; i++){
+        var candidate = units[i];
+        if(!candidate.alive) continue;
+        if(candidate === u) continue;
+        if(candidate.special === 'aura') continue;
+        if(candidate.maxHp > priestBestHp){
+          priestBestHp = candidate.maxHp;
+          priestTarget = candidate;
         }
       }
-      if(healTarget && u.healCooldown<=0){
-        var healAmt = Math.min(u.healPerSecond * dt, healTarget.maxHp - healTarget.hp);
-        healTarget.hp = Math.min(healTarget.maxHp, healTarget.hp + healAmt);
-        if(healAmt>0.5){
-          particles.push({x:healTarget.x,y:healTarget.y-16,text:'+'+Math.round(healAmt),t:0.7,color:'#a8e6cf'});
+
+      // Step 2: If we found a target, compute desired position 2 tiles behind it
+      if(priestTarget !== null){
+        var desiredX = priestTarget.x;
+        var desiredY = priestTarget.y + (2 * TILE);
+        // Clamp so priest stays inside the field
+        if(desiredY < TILE) desiredY = TILE;
+        if(desiredY > myGC.height - TILE) desiredY = myGC.height - TILE;
+
+        // Step 3: Only move if more than 0.3 tiles away from desired position
+        var dToDesired = dist(u.x, u.y, desiredX, desiredY);
+        if(dToDesired > TILE * 0.3){
+          moveTo(u, desiredX, desiredY, u.moveSpeed, dt);
         }
       }
+
+      continue; // priests don't attack
+    }
+
+    // =============================================
+    // FIELD MEDIC — locks onto first hurt ally in
+    // range and heals until full, then picks next
+    // =============================================
+    if(u.special==='heal'){
+
+      // Step 1: If we have a locked target, check it's still valid
+      // (alive and still hurt). If not, clear it.
+      if(u.healTarget !== null && u.healTarget !== undefined){
+        var t = u.healTarget;
+        if(!t.alive || t.hp >= t.maxHp){
+          u.healTarget = null;
+        }
+      }
+
+      // Step 2: If no target, scan for first hurt ally within range
+      if(!u.healTarget){
+        for(var i=0; i<units.length; i++){
+          var candidate = units[i];
+          if(!candidate.alive) continue;
+          if(candidate === u) continue;
+          if(candidate.hp >= candidate.maxHp) continue; // not hurt
+          var dToCandidate = dist(u.x, u.y, candidate.x, candidate.y);
+          if(dToCandidate <= u.range * TILE){
+            u.healTarget = candidate;
+            break; // lock onto first found
+          }
+        }
+      }
+
+      // Step 3: Heal the locked target
+      if(u.healTarget){
+        // dt is already GAME_SPEED× at top of update(), so don't multiply again
+        var healThisFrame = u.healPerSecond * dt;
+        u.healTarget.hp = u.healTarget.hp + healThisFrame;
+        if(u.healTarget.hp > u.healTarget.maxHp){
+          u.healTarget.hp = u.healTarget.maxHp;
+        }
+        // Show green particle every 0.5 real-time seconds
+        // healCooldown counts down in raw dt (before GAME_SPEED) to keep it real-time
+        u.healCooldown = u.healCooldown - (dt / GAME_SPEED);
+        if(u.healCooldown <= 0){
+          u.healCooldown = 0.5;
+          var healShown = Math.round(u.healPerSecond * 0.5);
+          particles.push({x:u.healTarget.x, y:u.healTarget.y-16, text:'+'+healShown, t:0.8, color:'#2ecc71'});
+        }
+      } else {
+        // No one needs healing — return to home position
+        var homeX = (u.homeCol + 0.5) * TILE;
+        var homeY = (u.homeRow + 0.5) * TILE;
+        moveTo(u, homeX, homeY, u.moveSpeed * 0.5, dt);
+      }
+
       continue; // medics don't attack
     }
 
-    // ---- Priest: no attack, just aura (handled above) ----
-    if(u.special === 'aura') continue;
-
     // ---- Regular attack logic ----
     var effectiveDmg = u.dmg + (u.auraDmg||0);
-    var closest=u.alert&&!u.alert.dead&&!u.alert.leaked?u.alert:null;
-    var closestD=closest?dist(u.x,u.y,closest.x,closest.y):Infinity;
-    var nearestE=null,nearestD=Infinity;
+
+    // Find enemies: closest in attack range, nearest overall
+    var closest = null, closestD = Infinity;
+    var nearestE = null, nearestD = Infinity;
     for(var e of enemies){
       if(e.dead||e.leaked)continue;
       var d=dist(u.x,u.y,e.x,e.y);
-      if(d<=u.range*TILE&&d<closestD){closest=e;closestD=d;}
-      if(d<nearestD){nearestE=e;nearestD=d;}
+      if(d<=u.range*TILE && d<closestD){closest=e; closestD=d;}
+      if(d<nearestD){nearestE=e; nearestD=d;}
     }
-    u.alert=null;
+    // Update squad alert: if this unit can see an enemy, share it with all teammates
+    if(closest && (!squadAlertEnemy || squadAlertEnemy.dead || squadAlertEnemy.leaked)){
+      squadAlertEnemy = closest;
+    }
+
     if(closest&&u.atkCooldown<=0){
       u.atkCooldown=1/u.atkSpeed;
       u.flashT=0.1;
@@ -729,11 +831,36 @@ function update(dt) {
       }
 
       if(closest.hp<=0){closest.dead=true;gold+=window.GAME_CONFIG.economy.killGold;updateUI();}
-      for(var ally of units){if(!ally.alive||ally===u)continue;if(!ally.alert&&dist(u.x,u.y,ally.x,ally.y)<=TILE*3)ally.alert=closest;}
-    } else if(nearestE&&nearestD>u.range*TILE*0.85&&nearestD<=u.range*TILE*2.5){
-      moveTo(u,nearestE.x,nearestE.y,u.moveSpeed,dt);
-    } else if(!nearestE||nearestD>u.range*TILE*2.5){
-      moveTo(u,(u.homeCol+0.5)*TILE,(u.homeRow+0.5)*TILE,u.moveSpeed*0.5,dt);
+    } else {
+      // No enemy in own attack range
+      // Check if squad alert is active and cap hasn't been reached
+      var alertActive = squadAlertEnemy && !squadAlertEnemy.dead && !squadAlertEnemy.leaked;
+      var pursueE = null;
+      if(alertActive){
+        // Count how many other units are already pursuing the alert target
+        var alertResponders = 0;
+        for(var ri=0; ri<units.length; ri++){
+          var ru = units[ri];
+          if(!ru.alive || ru === u || ru.special==='heal' || ru.special==='aura') continue;
+          // A unit is "responding" if it has no enemy in its own range and is moving toward alert
+          var rDist = dist(ru.x, ru.y, squadAlertEnemy.x, squadAlertEnemy.y);
+          if(rDist <= ru.range * TILE * 3) alertResponders++;
+        }
+        if(alertResponders < SQUAD_ALERT_CAP){
+          pursueE = squadAlertEnemy;
+        }
+      }
+      // Fall back to nearest enemy if not pursuing alert
+      if(!pursueE) pursueE = nearestE;
+
+      if(pursueE){
+        var pd = dist(u.x, u.y, pursueE.x, pursueE.y);
+        if(pd > u.range*TILE*0.85){
+          moveTo(u, pursueE.x, pursueE.y, u.moveSpeed, dt);
+        }
+      } else {
+        moveTo(u,(u.homeCol+0.5)*TILE,(u.homeRow+0.5)*TILE,u.moveSpeed*0.5,dt);
+      }
     }
 
     // Charge cooldown ticks every frame (not just on attack)
@@ -753,22 +880,34 @@ function update(dt) {
     if(e.dead||e.leaked)continue;
     if(e.flashT>0)e.flashT-=dt;
     if(e.atkCooldown>0)e.atkCooldown-=dt;
-    var nearestU=e.alert&&e.alert.alive&&e.alert.hp>0?e.alert:null;
-    var nearestUD=nearestU?dist(e.x,e.y,nearestU.x,nearestU.y):Infinity;
-    e.alert=null;
-    for(var u of units){if(!u.alive)continue;var d=dist(e.x,e.y,u.x,u.y);if(d<nearestUD){nearestU=u;nearestUD=d;}}
-    if(nearestU&&nearestUD<=TILE*1.1){
+    // Find nearest unit
+    var nearestU = null, nearestUD = Infinity;
+    for(var u of units){
+      if(!u.alive)continue;
+      var d=dist(e.x,e.y,u.x,u.y);
+      if(d<nearestUD){nearestU=u;nearestUD=d;}
+    }
+    // Update squad alert: if engaging a unit, share it with all enemies
+    if(nearestU && nearestUD<=TILE*1.5 && (!squadAlertUnit || !squadAlertUnit.alive || squadAlertUnit.hp<=0)){
+      squadAlertUnit = nearestU;
+    }
+    // Determine target: own nearest or squad alert
+    var pursueU = nearestU;
+    if(!pursueU || nearestUD > TILE*2){
+      var sa = (squadAlertUnit && squadAlertUnit.alive && squadAlertUnit.hp>0) ? squadAlertUnit : null;
+      if(sa) pursueU = sa;
+    }
+    if(pursueU && dist(e.x,e.y,pursueU.x,pursueU.y)<=TILE*1.1){
       if(e.atkCooldown<=0){
         e.atkCooldown=1.0;
         var eDmg=15;
-        var actual=dealDmg(nearestU, eDmg);
-        nearestU.flashT=0.15;
-        particles.push({x:nearestU.x,y:nearestU.y-14,text:'-'+actual,t:0.8,color:'#e74c3c'});
-        if(nearestU.hp<=0){nearestU.alive=false;nearestU.hp=0;}
-        for(var ally of enemies){if(ally.dead||ally.leaked||ally===e)continue;if(!ally.alert&&dist(e.x,e.y,ally.x,ally.y)<=TILE*3)ally.alert=nearestU;}
+        var actual=dealDmg(pursueU, eDmg);
+        pursueU.flashT=0.15;
+        particles.push({x:pursueU.x,y:pursueU.y-14,text:'-'+actual,t:0.8,color:'#e74c3c'});
+        if(pursueU.hp<=0){pursueU.alive=false;pursueU.hp=0;}
       }
     }
-    else if(nearestU&&nearestUD<TILE*5){moveTo(e,nearestU.x,nearestU.y,e.speed,dt);}
+    else if(pursueU){moveTo(e,pursueU.x,pursueU.y,e.speed,dt);}
     else{moveTo(e,lx,exitY,e.speed,dt);}
     if(e.y>=EXIT_ROW*TILE+TILE*0.3){e.leaked=true;leakedEnemies.push({x:(KC/2+(Math.random()-0.5)*1.5)*KT,y:KT*1.2,hp:Math.ceil(e.hp),maxHp:e.maxHp,speed:e.speed*1.3,dead:false,flashT:0.6,atkCooldown:0,armor:0});;kParticles.push({x:KC/2*KT,y:KT*1.5,text:'⚡ LEAKED!',t:1.8,color:'#e74c3c',big:true});}
     else{e.x=clamp(e.x,TILE*0.3,myGC.width-TILE*0.3);e.y=clamp(e.y,TILE*0.3,myGC.height-TILE*0.3);}
@@ -818,7 +957,7 @@ function update(dt) {
     var income=ecoCfg2.waveCompleteBase+wave+(leaks===0?ecoCfg2.waveCompleteCleanBonus:0);
     gold+=income;
     var finishedWave=wave;
-    wave++;enemies=[];leakedEnemies=[];scoreSaved=false;
+    wave++;enemies=[];leakedEnemies=[];scoreSaved=false;squadAlertEnemy=null;squadAlertUnit=null;
     particles.push({x:myGC.width/2,y:myGC.height/2,text:leaks===0?'✓ CLEAN! +'+income+'g':'WAVE DONE +'+(ecoCfg2.waveCompleteBase+finishedWave)+'g',t:2.0,color:leaks===0?'#2ecc71':'#f1c40f',big:true});
     phase='income';
     updateUI();
@@ -849,7 +988,7 @@ function drawMyGrid() {
   for(var u of units){
     if(!u.alive&&phase==='combat')continue;
     var r=TILE*0.36;
-    ctx.fillStyle=u.flashT>0?'#fff':u.color;
+    ctx.fillStyle=u.flashT>0?(u.beingHealed?'#2ecc71':'#fff'):u.color;
     ctx.beginPath();ctx.arc(u.x,u.y,r,0,Math.PI*2);ctx.fill();
     // Aura ring for priests
     if(u.special==='aura'){
