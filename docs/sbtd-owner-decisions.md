@@ -8,9 +8,8 @@
 
 | Decision | Answer | Status |
 |---|---|---|
-| Cloudflare account — shared project account or personal? | **Shared account for the project** | ✅ Decided |
-| Who owns/pays for the Cloudflare account? | **Morbror owns it, Morbror pays** | ✅ Decided |
-| Domain registration (sbtd.io, ~$32/year) | Morbror registers via Cloudflare account | ✅ Decided |
+| Cloudflare account | Shared project account, Morbror owns and pays | ✅ |
+| Domain | sbtd.io via Cloudflare Registrar | ✅ |
 
 ---
 
@@ -18,32 +17,35 @@
 
 | Decision | Answer | Status |
 |---|---|---|
-| Who handles art? | **Morbror handles art direction** | ✅ Decided |
-| External artist? | **No** | ✅ Decided |
-| Asset strategy for alpha | **Royalty-free packs (Kenney.nl) for alpha, commission originals later** | ✅ Decided |
-
-**Note:** Kenney.nl (https://kenney.nl/assets) has extensive free tower defence and top-down sprite packs under CC0 license. Good starting point.
+| Art direction | Morbror handles | ✅ |
+| Alpha assets | Kenney.nl (CC0 royalty-free packs), originals later | ✅ |
+| Audio | Scaffold only for alpha — no actual audio | ✅ |
 
 ---
 
-## Audio
+## Races
+
+### Race 1 — Human Alliance
+Balanced generalists. 8 units. (Validated in prototype)
+
+### Race 2 — Human Survivors
+*Survived the apocalypse. Ragtag team.*
+Balanced generalists.
+
+### Race 3 — Clockwork Mechanicum
+*Mechanical robots controlled by a master.*
+High damage, high speed, fragile.
+
+### Race 4 — CRISPR Corps
+*USMC soldiers from a failed genetic experiment.*
+Slow, tanky.
 
 | Decision | Answer | Status |
 |---|---|---|
-| Audio in alpha scope? | **Scaffold only — no actual audio for alpha** | ✅ Decided |
-| Style for post-alpha? | TBD | ⏳ Later |
-
----
-
-## Game Balance
-
-| Decision | Answer | Status |
-|---|---|---|
-| Who owns balance decisions? | **Morbror, or community vote in Discord** | ✅ Decided |
-| Balance process | **Daily game stats → nerf/buff based on outcomes** | ✅ Decided |
-| Carry over numbers from prototype? | **No — starting fresh** | ✅ Decided |
-
-**Implication:** Backend must log per-game stats (waves survived, units used, win/loss, king HP remaining) so balance decisions have data to lean on.
+| Units per race | 8 | ✅ |
+| Racial bonuses / passive abilities | XP + level-up per unit. XP from kills and surviving waves. | ✅ |
+| Lore depth | Minimal | ✅ |
+| Inspiration | Fully original (not Warcraft 3) | ✅ |
 
 ---
 
@@ -51,12 +53,11 @@
 
 | Decision | Answer | Status |
 |---|---|---|
-| Number of lanes (first map) | **1 lane** | ✅ Decided |
-| Map size | **Small to start** | ✅ Decided |
-| Opponent layout | **Mirror image** | ✅ Decided |
-| Maps at alpha | **1 map** | ✅ Decided |
-| Who designs the map layout? | **Morbror (grid sketch)** | ✅ Decided |
-| Map design format | Rough sketch (Paint / paper photo) — drop in Discord | ⏳ Pending Morbror sketch |
+| Maps for alpha | **2 maps** | ✅ |
+| First map: lanes | 1 lane | ✅ |
+| First map: size | Small | ✅ |
+| Opponent layout | Mirror image | ✅ |
+| Map designer | Morbror (grid sketch) | ⏳ Pending sketches |
 
 ---
 
@@ -64,34 +65,39 @@
 
 | Decision | Answer | Status |
 |---|---|---|
-| First mode to implement | TBD — 1v1 or 1vCPU? | ⏳ Needs answer |
-| FFA up to 8 players | Confirmed in requirements | ✅ In requirements |
+| First mode | 1vCPU (enables solo testing, then add 1v1) | ✅ |
+| Alpha modes | 1v1 multiplayer + 1vCPU minimum | ✅ |
+| FFA | Up to 8 players (in requirements, post-alpha) | ✅ |
 
 ---
 
-## Race Design
+## Game Balance
 
 | Decision | Answer | Status |
 |---|---|---|
-| Races for alpha | Human Alliance confirmed. Others? | ⏳ Needs answer |
+| Balance ownership | Morbror + Discord voting | ✅ |
+| Process | Daily game stats → nerf/buff | ✅ |
+| Starting numbers | Fresh — not from prototype | ✅ |
 
 ---
 
-## Release Criteria
+## Alpha Release Criteria
 
 | Decision | Answer | Status |
 |---|---|---|
-| What defines "good enough for alpha"? | TBD | ⏳ Needs answer |
+| Alpha definition | Public-facing, MVP, multiple concurrent players | ✅ |
+| Minimum scope | 3 races + 2 maps + multiplayer | ✅ |
+| Concurrent capacity target | ~10–20 game rooms | ✅ |
+| Bug tolerance | Any level — game must be playable | ✅ |
+| Target date | April 15th 2026 (or earlier) | ✅ |
 
 ---
 
-## Summary: Still Pending
+## Still Pending
 
-1. **Map sketch** — Morbror to draw first map layout (grid, lane, spawn zone, exit portal) and post in Discord
-2. **First game mode** — 1v1 or 1vCPU first?
-3. **Additional races** for alpha (beyond Human Alliance)?
-4. **Alpha release criteria** — what needs to be working before inviting external players?
-
----
+1. **Map sketches** — Morbror to draw both map layouts and post in Discord
+2. **Race 2 (Human Survivors) unit designs** — 8 units, balanced generalist theme
+3. **Race 3 (Clockwork Mechanicum) unit designs** — 8 units, high damage/speed/fragile
+4. **Race 4 (CRISPR Corps) unit designs** — 8 units, slow/tanky
 
 *Last updated: 2026-03-28*
