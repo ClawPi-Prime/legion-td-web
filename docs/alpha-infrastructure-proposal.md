@@ -423,7 +423,7 @@ For alpha: **Starter web service + Starter Postgres = ~$14/month**. Render also 
 
 ### What Migration Requires
 
-1. **Dockerize the Node.js app** (Fly.io/Render require this; Railway can use Nixpacks to avoid it)
+1. **Docker images already exist** — both frontend and backend have `Dockerfile`s and run as containers in k3s today. For cloud providers, the existing images can be pushed to a registry (Docker Hub, Fly.io registry, GHCR) with no changes required.
 2. **Environment variable audit** — extract all hardcoded config into env vars
 3. **Database migration** — `pg_dump` + `pg_restore`, ensure connection strings are parameterized
 4. **WebSocket sticky sessions** — if you run multiple replicas, Socket.io requires sticky sessions or Redis adapter. For alpha, run single replica.
@@ -489,7 +489,7 @@ For alpha: **Starter web service + Starter Postgres = ~$14/month**. Render also 
 
 ### Phase 4: Cloud Migration (When Needed)
 
-21. Dockerize the Node.js app
+21. Push existing Docker images to a registry (Docker Hub or GHCR) for cloud deployment
 22. Audit and externalize all env vars
 23. Choose Railway (simplest) or Fly.io (cheapest)
 24. Migrate Postgres data via pg_dump/restore
