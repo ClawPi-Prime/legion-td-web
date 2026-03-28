@@ -13,7 +13,7 @@ SquadBattleTD is moving from LAN-only prototype to a real alpha with external pl
 
 1. **Registering sbtd.io** (~$32–50/year, see below) and pointing it at the Pi without opening router ports.
 2. **Deploying Cloudflare Tunnel** (`cloudflared`) to expose the game publicly — no port forwarding, no dynamic DNS required — with automatic SSL/TLS included.
-3. **Hardening the Node.js backend** to be safe for real external players (rate limiting, input validation, helmet, auth).
+3. **Hardening the Node.js backend** to be safe for real external players (rate limiting, input validation, helmet, anonymous UUID-based identity — no login required).
 4. **Ensuring a clean migration path** to cloud (Fly.io or Railway) when the Pi stops being enough.
 
 Everything can be done incrementally. Estimated cost to launch alpha: **~$32–50/year** (domain only) if self-hosted. Cloud migration budget if needed: **~$20–40/month** on Railway or Fly.io for a modest setup.
@@ -239,12 +239,20 @@ cloudflared tunnel route dns sbtd-pi-tunnel www.sbtd.io
 
 An alpha differs from a prototype in that **real, unknown users are accessing it**. Here's what needs to be added before opening access.
 
-### 5.1 Authentication
+### 5.1 Identity — Anonymous Players (Cookie-Based)
 
-- [ ] **User accounts with passwords** — implement proper bcrypt hashing (never plain text or MD5)
-- [ ] **Session management** — use `express-session` with a secure, random secret; set `httpOnly`, `secure`, `sameSite` cookie flags
-- [ ] **JWT or session tokens** — pick one and be consistent
-- [ ] **Rate limit login attempts** — use `express-rate-limit` to prevent brute force
+No login or account system required. Players get a persistent anonymous identity via a UUID stored in a cookie:
+
+- **UUID generated client-side** on first visit (`crypto.randomUUID()`) and stored in a long-lived cookie (`player_id`, 1 year)
+- **Display name** is free-choice — stored in a second cookie (`player_name`) alongside a list of recently used names
+- **Server associates** game scores and sessions with the UUID, not an account
+- **No passwords, no email, no registration friction**
+- Cookie flags: `httpOnly: false` (client JS needs to read it), `secure: true` (HTTPS only), `sameSite: Lax`
+- UUID should be treated as a soft identity — it identifies a device/browser, not a verified person
+
+**What this means for the DB schema:**
+- `players` table: `(uuid TEXT PRIMARY KEY, display_name TEXT, best_wave INT, games_played INT, last_seen TIMESTAMPTZ)`
+- UUID is the primary key, no passwords column needed
 
 ### 5.2 Input Validation & Injection
 
@@ -458,7 +466,7 @@ For alpha: **Starter web service + Starter Postgres = ~$14/month**. Render also 
 11. Run `npm audit` — fix high/critical issues
 12. Set up basic request size limits on all Express routes
 13. Validate and sanitize all Socket.io event payloads server-side
-14. Implement user authentication if not already present (bcrypt passwords, secure sessions)
+14. Implement anonymous player identity (UUID cookie, display name history in cookie, update DB schema)
 15. Set up daily PostgreSQL backup cron job:
     ```bash
     0 3 * * * pg_dump -U postgres sbtd | gzip > /backups/sbtd_$(date +%Y%m%d).sql.gz
